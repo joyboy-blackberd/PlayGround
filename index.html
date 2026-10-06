@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Simple Fireworks</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; overflow: hidden; background: #050510; font-family: system-ui, -apple-system, sans-serif; }
+  #sky { position: fixed; inset: 0; display: block; cursor: crosshair; }
+  .ui {
+    position: fixed; top: 16px; left: 50%; transform: translateX(-50%);
+    display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: center;
+    background: rgba(10,10,25,.65); backdrop-filter: blur(8px);
+    border: 1px solid rgba(255,255,255,.12); border-radius: 999px;
+    padding: 8px 12px; color: #fff; user-select: none; z-index: 10;
+  }
+  .ui h1 { font-size: 14px; font-weight: 700; letter-spacing: .04em; margin-right: 4px; }
+  .ui button {
+    border: 1px solid rgba(255,255,255,.2); background: rgba(255,255,255,.1);
+    color: #fff; border-radius: 999px; padding: 6px 12px; font-size: 13px; cursor: pointer;
+  }
+  .ui button:hover { background: rgba(255,255,255,.2); }
+  .ui button.active { background: #fff; color: #111; }
+  .hint {
+    position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
+    color: rgba(255,255,255,.6); font-size: 13px; z-index: 10; pointer-events: none;
+    background: rgba(0,0,0,.35); padding: 6px 12px; border-radius: 999px;
+  }
+</style>
+</head>
+<body>
+<canvas id="sky"></canvas>
+
+<div class="ui">
+  <h1>🎆 Fireworks</h1>
+  <button id="launchBtn">Launch</button>
+  <button id="autoBtn" class="active">Auto: On</button>
+  <button id="clearBtn">Clear</button>
+</div>
+<div class="hint">Click / tap anywhere to launch • Space = launch</div>
+
+<script>
+const canvas = document.getElementById('sky');
+const ctx = canvas.getContext('2d');
+let W, H;
+function resize() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+}
+window.addEventListener('resize', resize);
+resize();
+
+const rockets = [];
+const particles = [];
+let auto = true;
+let lastAuto = 0;
+
+const rand = (a, b) => a + Math.random() * (b - a);
+const pickHue = () => Math.floor(rand(0, 360));
+
+function launch(x, y) {
+  const startX = x ?? rand(W * 0.15, W * 0.85);
+  const startY = H;
+  const targetY = y ?? rand(H * 0.15, H * 0.45);
+  rockets.push({
+    x: startX, y: startY,
+    vx: rand(-0.6, 0.6),
+    vy: rand(-11, -8),
+    targetY,
+    hue: pickHue(),
+    trail: []
+  });
+}
+
+function explode(x, y, hue) {
+  const count = 70 + Math.floor(Math.random() * 50);
+  const power = rand(2, 5.5);
+  // ring + random mix for a nice shape
+  for (let i = 0; i < count; i++) {
+    const angle = (i / count) * Math.PI * 2 + rand(-0.1, 0.1);
+    const speed = (i % 2 === 0 ? power : power * rand(0.3, 0.9)) * rand(0.7, 1.2);
+    particles.push({
+      x, y,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      life: 1,
+      decay: rand(0.008, 0.018),
+      hue: hue + rand(-20, 20),
+      size: rand(1.2, 2.8),
+      gravity: 0.045
+    });
+  }
+  // flash
+  particles.push({ x, y, vx: 0, vy: 0, life: 1, decay: 0.08, hue, size: 4, flash: true, gravity: 0 });
+}
+
+function loop(t) {
+  requestAnimationFrame(loop);
+
+  // fade trails
+  ctx.globalCompositeOperation = 'destination-out';
+  ctx.fillStyle = 'rgba(0,0,0,0.18)';
+  ctx.fillRect(0, 0, W, H);
+  ctx.globalCompositeOperation = 'lighter';
+
+  // auto launch
+  if (auto && t - lastAuto > 650) {
+    lastAuto = t;
+    launch();
+    if (Math.random() < 0.4) setTimeout(() => launch(), 150);
+  }
+
+  // rockets
+  for (let i = rockets.length - 1; i >= 0; i--) {
+    const r = rockets[i];
+    r.x += r.vx;
+    r.y += r.vy;
+    r.vy += 0.12;
+    r.trail.push({ x: r.x, y: r.y });
+    if (r.trail.length > 12) r.trail.shift();
+
+    // draw trail
+    for (let j = 0; j < r.trail.length; j++) {
+      const p = r.trail[j];
+      ctx.fillStyle = `hsla(${r.hue},100%,65%,${j / r.trail.length})`;
+      ctx.fillRect(p.x, p.y, 2, 2);
+    }
+    // head
+    ctx.fillStyle = `hsl(${r.hue},100%,75%)`;
+    ctx.beginPath();
+    ctx.arc(r.x, r.y, 2.2, 0, Math.PI * 2);
+    ctx.fill();
+
+    if (r.vy >= -1 || r.y <= r.targetY) {
+      explode(r.x, r.y, r.hue);
+      rockets.splice(i, 1);
+    }
+  }
+
+  // particles
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.x += p.vx;
+    p.y += p.vy;
+    p.vx *= 0.985;
+    p.vy = p.vy * 0.985 + p.gravity;
+    p.life -= p.decay;
+    if (p.life <= 0) { particles.splice(i, 1); continue; }
+
+    if (p.flash) {
+      ctx.fillStyle = `hsla(${p.hue},100%,80%,${p.life * 0.35})`;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 40 * (1 - p.life) + 8, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      ctx.fillStyle = `hsla(${p.hue},100%,${50 + p.life * 20}%,${p.life})`;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size * p.life + 0.4, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+}
+requestAnimationFrame(loop);
+
+// interactions
+function pointerLaunch(e) {
+  const x = e.clientX ?? (e.touches && e.touches[0].clientX);
+  const y = e.clientY ?? (e.touches && e.touches[0].clientY);
+  if (x == null) return launch();
+  // rocket starts from bottom, explodes where clicked
+  rockets.push({
+    x: x, y: H, vx: rand(-0.5, 0.5), vy: rand(-11, -9),
+    targetY: y, hue: pickHue(), trail: []
+  });
+}
+canvas.addEventListener('pointerdown', pointerLaunch);
+window.addEventListener('keydown', (e) => {
+  if (e.code === 'Space') { e.preventDefault(); launch(); }
+});
+
+document.getElementById('launchBtn').onclick = () => launch();
+document.getElementById('clearBtn').onclick = () => {
+  rockets.length = 0; particles.length = 0;
+  ctx.clearRect(0, 0, W, H);
+};
+const autoBtn = document.getElementById('autoBtn');
+autoBtn.onclick = () => {
+  auto = !auto;
+  autoBtn.textContent = `Auto: ${auto ? 'On' : 'Off'}`;
+  autoBtn.classList.toggle('active', auto);
+};
+
+// initial burst
+for (let i = 0; i < 3; i++) setTimeout(() => launch(), i * 250);
+</script>
+</body>
+</html>
